@@ -56,32 +56,11 @@ func parseFloatFast(bs []byte) float64 {
 	return v
 }
 
-func main() {
-	if shouldProfile {
-		nowUnix := time.Now().Unix()
-		os.MkdirAll(fmt.Sprintf("profiles/%d", nowUnix), 0755)
-		for _, profileType := range profileTypes {
-			file, _ := os.Create(fmt.Sprintf("profiles/%d/%s.%s.pprof", nowUnix, filepath.Base(measurementsPath), profileType))
-			defer file.Close()
-			defer pprof.Lookup(profileType).WriteTo(file, 0)
-		}
-
-		file, _ := os.Create(fmt.Sprintf("profiles/%d/%s.cpu.pprof", nowUnix, filepath.Base(measurementsPath)))
-		defer file.Close()
-		pprof.StartCPUProfile(file)
-		defer pprof.StopCPUProfile()
-	}
-
-	f, err := os.Open(measurementsPath)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer f.Close()
-
+func parse(f *os.File) map[string]*Stats {
 	// result data
-	names := make([]string, 0, 10000)
 	stats := make(map[string]*Stats, 10000)
 
+	// parser state
 	bs := make([]byte, 1024*1024*1024) // file byte buffer. NOTE: sizing?
 	remainderBs := make([]byte, 100)   // remainder unparsed from the last buffer
 	lastName := make([]byte, 100)      // last name parsed
@@ -92,7 +71,7 @@ func main() {
 		// load the buffer
 		n, err := f.Read(bs)
 		if err == io.EOF {
-			break
+			return stats
 		} else if err != nil {
 			log.Fatal(err)
 		}
@@ -134,7 +113,6 @@ func main() {
 						if s, ok := stats[nameUnsafe]; !ok {
 							name := string(lastName[:lastNameLen]) // actually allocate string
 							stats[name] = &Stats{Min: value, Max: value, Sum: value, Count: 1}
-							names = append(names, name)
 						} else {
 							if value < s.Min {
 								s.Min = value
@@ -163,8 +141,14 @@ func main() {
 			remainderLen = copy(remainderBs, bs[start:])
 		}
 	}
+}
 
+func printResults(stats map[string]*Stats) {
 	// sorted alphabetically for output
+	names := make([]string, 0, len(stats))
+	for name := range stats {
+		names = append(names, name)
+	}
 	sort.Strings(names)
 
 	// build up result
@@ -182,4 +166,30 @@ func main() {
 	writer := bufio.NewWriter(os.Stdout)
 	fmt.Fprintf(writer, "{%s}\n", builder.String())
 	writer.Flush()
+}
+
+func main() {
+	if shouldProfile {
+		nowUnix := time.Now().Unix()
+		os.MkdirAll(fmt.Sprintf("profiles/%d", nowUnix), 0755)
+		for _, profileType := range profileTypes {
+			file, _ := os.Create(fmt.Sprintf("profiles/%d/%s.%s.pprof", nowUnix, filepath.Base(measurementsPath), profileType))
+			defer file.Close()
+			defer pprof.Lookup(profileType).WriteTo(file, 0)
+		}
+
+		file, _ := os.Create(fmt.Sprintf("profiles/%d/%s.cpu.pprof", nowUnix, filepath.Base(measurementsPath)))
+		defer file.Close()
+		pprof.StartCPUProfile(file)
+		defer pprof.StopCPUProfile()
+	}
+
+	f, err := os.Open(measurementsPath)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer f.Close()
+
+	stats := parse(f)
+	printResults(stats)
 }

@@ -10,6 +10,8 @@ diff data/measurements_1b.out <(time MEASUREMENTS_PATH=data/measurements_1b.txt 
 # MEASUREMENTS_PATH=data/measurements_1b.txt PROFILE=true ./bin/main  30.25s user 1.62s system 91% cpu 35.002 total
 ```
 
+Add your measurement files and expected results to `data/`.
+
 ## Log
 Measured locally on my 2023 Apple M2 Pro Macbook.
 
