@@ -11,6 +11,7 @@ import (
 	"runtime/pprof"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 	"unsafe"
 )
@@ -22,11 +23,18 @@ var (
 	profileTypes = []string{"goroutine", "allocs"} // "heap", "threadcreate", "block", "mutex"
 )
 
+const (
+	maxNameLen = 100
+	maxNameNum = 10000
+
+	// Tune these for performance
+	numParsers     = 12
+	parseChunkSize = 256 * 1024 * 1024
+)
+
 type Stats struct {
-	Min   float64
-	Max   float64
-	Sum   float64
-	Count int
+	Min, Max, Sum float64
+	Count         int
 }
 
 // rounding floats to 1 decimal place with 0.05 rounding up to 0.1
@@ -43,7 +51,6 @@ func parseFloatFast(bs []byte) float64 {
 	}
 
 	v := float64(bs[len(bs)-1]-'0') / 10 // single decimal digit
-
 	place := 1.0
 	for i := len(bs) - 3; i >= intStartIdx; i-- { // integer part
 		v += float64(bs[i]-'0') * place
@@ -56,94 +63,87 @@ func parseFloatFast(bs []byte) float64 {
 	return v
 }
 
-func parse(f *os.File) map[string]*Stats {
-	// result data
-	stats := make(map[string]*Stats, 10000)
+// size is the intended number of bytes to parse. buffer should be longer than size
+// because we need to continue reading until the end of the line in order to
+// properly segment the entire file and not miss any data.
+func parseAt(f *os.File, buf []byte, offset int64, size int) map[string]*Stats {
+	stats := make(map[string]*Stats, maxNameNum)
+	n, err := f.ReadAt(buf, offset) // load the buffer
+	if err != nil && err != io.EOF {
+		log.Fatal(err)
+	}
 
-	// parser state
-	bs := make([]byte, 1024*1024*1024) // file byte buffer. NOTE: sizing?
-	remainderBs := make([]byte, 100)   // remainder unparsed from the last buffer
-	lastName := make([]byte, 100)      // last name parsed
-	var remainderLen, lastNameLen int
-
+	lastName := make([]byte, maxNameLen) // last name parsed
+	var lastNameLen int
 	isScanningName := true // currently scanning name or value?
-	for {
-		// load the buffer
-		n, err := f.Read(bs)
-		if err == io.EOF {
-			return stats
-		} else if err != nil {
-			log.Fatal(err)
-		}
 
-		// tick tock between parsing names and values; accummulating stats and
-		// keeping track of unparsed remainders
-		var idx, start int
-		for {
-			if isScanningName {
-				for idx < n {
-					if bs[idx] == ';' {
-						nameBs := bs[start:idx]
-						// TODO: handle remainder outside of this tight loop?
-						if remainderLen > 0 {
-							nameBs = append(remainderBs[:remainderLen], nameBs...)
-							remainderLen = 0
-						}
-						lastNameLen = copy(lastName, nameBs)
-
-						idx++
-						start = idx
-						isScanningName = false
-						break
-					}
-					idx++
-				}
-			} else {
-				for idx < n {
-					if bs[idx] == '\n' {
-						valueBs := bs[start:idx]
-						// TODO: handle remainder outside of this tight loop?
-						if remainderLen > 0 {
-							valueBs = append(remainderBs[:remainderLen], valueBs...)
-							remainderLen = 0
-						}
-						value := parseFloatFast(valueBs)
-
-						nameUnsafe := unsafe.String(&lastName[0], lastNameLen)
-						if s, ok := stats[nameUnsafe]; !ok {
-							name := string(lastName[:lastNameLen]) // actually allocate string
-							stats[name] = &Stats{Min: value, Max: value, Sum: value, Count: 1}
-						} else {
-							if value < s.Min {
-								s.Min = value
-							}
-							if value > s.Max {
-								s.Max = value
-							}
-							s.Sum += value
-							s.Count++
-						}
-
-						idx++
-						start = idx
-						isScanningName = true
-						break
-					}
-					idx++
-				}
-			}
-			if idx >= n {
+	// if offset is non-zero, skip to the first new line
+	var idx, start int
+	if offset != 0 {
+		for idx < n {
+			if buf[idx] == '\n' {
+				idx++
+				start = idx
 				break
 			}
-		}
-
-		if start < n {
-			remainderLen = copy(remainderBs, bs[start:])
+			idx++
 		}
 	}
+	// tick tock between parsing names and values while accummulating stats
+	for {
+		if isScanningName {
+			for idx < n {
+				if buf[idx] == ';' {
+					nameBs := buf[start:idx]
+					lastNameLen = copy(lastName, nameBs)
+
+					idx++
+					start = idx
+					isScanningName = false
+					break
+				}
+				idx++
+			}
+		} else {
+			for idx < n {
+				if buf[idx] == '\n' {
+					valueBs := buf[start:idx]
+					value := parseFloatFast(valueBs)
+
+					nameUnsafe := unsafe.String(&lastName[0], lastNameLen)
+					if s, ok := stats[nameUnsafe]; !ok {
+						name := string(lastName[:lastNameLen]) // actually allocate string
+						stats[name] = &Stats{Min: value, Max: value, Sum: value, Count: 1}
+					} else {
+						if value < s.Min {
+							s.Min = value
+						}
+						if value > s.Max {
+							s.Max = value
+						}
+						s.Sum += value
+						s.Count++
+					}
+
+					idx++
+					start = idx
+					isScanningName = true
+					break
+				}
+				idx++
+			}
+		}
+		// terminate when we hit the first newline after the intended size OR
+		// when we hit the end of the file
+		if (isScanningName && idx >= size) || idx >= n {
+			break
+		}
+	}
+
+	return stats
 }
 
-func printResults(stats map[string]*Stats) {
+func printResults(stats map[string]*Stats) { // doesn't help
 	// sorted alphabetically for output
 	names := make([]string, 0, len(stats))
 	for name := range stats {
@@ -151,7 +151,6 @@ func printResults(stats map[string]*Stats) {
 	}
 	sort.Strings(names)
 
-	// build up result
 	var builder strings.Builder
 	for i, name := range names {
 		s := stats[name]
@@ -162,12 +161,14 @@ func printResults(stats map[string]*Stats) {
 		}
 	}
 
-	// print result to stdout
 	writer := bufio.NewWriter(os.Stdout)
 	fmt.Fprintf(writer, "{%s}\n", builder.String())
 	writer.Flush()
 }
 
+// Read file in chunks and parse concurrently. N parsers work off of a chunk
+// offset chan and send results on an output chan. The results are merged into a
+// single map of stats and printed.
 func main() {
 	if shouldProfile {
 		nowUnix := time.Now().Unix()
@@ -190,6 +191,59 @@ func main() {
 	}
 	defer f.Close()
 
-	stats := parse(f)
-	printResults(stats)
+	info, err := f.Stat()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	wg := sync.WaitGroup{}
+	wg.Add(numParsers)
+
+	chunkOffsetCh := make(chan int64, numParsers)
+	chunkStatsCh := make(chan map[string]*Stats, numParsers) // buffered to not block on merging
+
+	go func() {
+		for i := 0; i < int(info.Size()); i++ {
+			chunkOffsetCh <- int64(i)
+			i += parseChunkSize
+		}
+		close(chunkOffsetCh)
+	}()
+
+	for i := 0; i < numParsers; i++ {
+		// WARN: w/ 128B padding for line overflow. Each chunk should be read past
+		// the intended size to the next new line.
+		buf := make([]byte, parseChunkSize+128)
+		go func() {
+			for chunkOffset := range chunkOffsetCh {
+				chunkStatsCh <- parseAt(f, buf, chunkOffset, parseChunkSize)
+			}
+			wg.Done()
+		}()
+	}
+
+	go func() {
+		wg.Wait()
+		close(chunkStatsCh)
+	}()
+
+	mergedStats := make(map[string]*Stats, maxNameNum)
+	for chunkStats := range chunkStatsCh {
+		for name, s := range chunkStats {
+			if ms, ok := mergedStats[name]; !ok {
+				mergedStats[name] = s
+			} else {
+				if s.Min < ms.Min {
+					ms.Min = s.Min
+				}
+				if s.Max > ms.Max {
+					ms.Max = s.Max
+				}
+				ms.Sum += s.Sum
+				ms.Count += s.Count
+			}
+		}
+	}
+
+	printResults(mergedStats)
 }

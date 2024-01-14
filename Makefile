@@ -1,6 +1,6 @@
 .PHONY: run
 run: build
-	@export MEASUREMENTS_PATH=data/measurements_1b.txt; export PROFILE=true; bash -c 'diff data/measurements_1b.out <(time ./bin/main)'
+	@export MEASUREMENTS_PATH=data/measurements.txt; export PROFILE=true; bash -c 'diff data/measurements.out <(time ./bin/main)'
 
 .PHONY: run-small
 run-small: build
