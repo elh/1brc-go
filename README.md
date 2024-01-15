@@ -4,6 +4,8 @@ Parse and aggregate 1B rows of text very quickly using Go for the [1BRC challeng
 
 Mainly done as an excuse to play around with `pprof`.
 
+<sub>_NOTE: Originally developed at [elh/1brc-go](https://github.com/elh/1brc-go) and copied into gunnarmorling/1brc._</sub>
+
 <br>
 
 ## Performance

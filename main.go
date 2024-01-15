@@ -8,6 +8,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"runtime/pprof"
 	"sort"
 	"strings"
@@ -32,7 +33,7 @@ const (
 	maxNameNum = 10000
 
 	// Tune these for performance
-	numParsers     = 12
+	minNumParsers  = 12 // currently configured to the number of runtime.NumCPU()
 	parseChunkSize = 256 * 1024 * 1024
 )
 
@@ -197,6 +198,7 @@ func main() {
 		defer pprof.StopCPUProfile()
 	}
 
+	// read file
 	f, err := os.Open(measurementsPath)
 	if err != nil {
 		log.Fatal(fmt.Errorf("failed to open %s file: %w", measurementsPath, err))
@@ -206,6 +208,12 @@ func main() {
 	info, err := f.Stat()
 	if err != nil {
 		log.Fatal(fmt.Errorf("failed to read %s file: %w", measurementsPath, err))
+	}
+
+	// kick off "parser" workers
+	numParsers := runtime.NumCPU()
+	if minNumParsers > numParsers {
+		numParsers = minNumParsers
 	}
 
 	wg := sync.WaitGroup{}
