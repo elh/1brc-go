@@ -1,6 +1,9 @@
 data/
 bin/
 profiles/
+timing.json
+measurements.txt
+measurements.out
 
 ignore/
 

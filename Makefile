@@ -1,13 +1,14 @@
 .PHONY: run
 run: build
-	@export MEASUREMENTS_PATH=data/measurements.txt; export PROFILE=true; bash -c 'diff data/measurements.out <(time ./bin/main)'
+	@export PROFILE=true; bash -c 'diff measurements.out <(time ./bin/1brc-go)'
 
-.PHONY: run-small
-run-small: build
-	@export MEASUREMENTS_PATH=data/measurements_1m.txt; export PROFILE=true; bash -c 'diff data/measurements_1m.out <(time ./bin/main)'
+# Approach taken from 1brc evaluation.sh. Requires hyperfine to be installed.
+.PHONY: evaluate
+evaluate: build
+	@hyperfine --warmup 0 --runs 5 --export-json timing.json "./bin/1brc-go 2>&1"
 
 build:
-	@go build -o bin main.go
+	@go build -o bin/1brc-go main.go
 
 .PHONY: pprof
 pprof:

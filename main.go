@@ -16,11 +16,15 @@ import (
 	"unsafe"
 )
 
-var (
-	measurementsPath = os.Getenv("MEASUREMENTS_PATH")
-	shouldProfile    = os.Getenv("PROFILE") == "true"
+// go run main.go [measurements_file]
 
-	profileTypes = []string{"goroutine", "allocs"} // "heap", "threadcreate", "block", "mutex"
+var (
+	// Optional env vars
+	shouldProfile = os.Getenv("PROFILE") == "true"
+
+	defaultMeasurementsPath = "measurements.txt"
+	// others: "heap", "threadcreate", "block", "mutex"
+	profileTypes = []string{"goroutine", "allocs"}
 )
 
 const (
@@ -154,7 +158,8 @@ func printResults(stats map[string]*Stats) { // doesn't help
 	var builder strings.Builder
 	for i, name := range names {
 		s := stats[name]
-		avg := round(s.Sum / float64(s.Count))
+		// gotcha: first round the sum to to remove float precision errors!
+		avg := round(round(s.Sum) / float64(s.Count))
 		builder.WriteString(fmt.Sprintf("%s=%.1f/%.1f/%.1f", name, s.Min, avg, s.Max))
 		if i < len(names)-1 {
 			builder.WriteString(", ")
@@ -170,16 +175,23 @@ func printResults(stats map[string]*Stats) { // doesn't help
 // offset chan and send results on an output chan. The results are merged into a
 // single map of stats and printed.
 func main() {
+	measurementsPath := defaultMeasurementsPath
+	if len(os.Args) > 1 {
+		measurementsPath = os.Args[1]
+	}
+
 	if shouldProfile {
 		nowUnix := time.Now().Unix()
 		os.MkdirAll(fmt.Sprintf("profiles/%d", nowUnix), 0755)
 		for _, profileType := range profileTypes {
-			file, _ := os.Create(fmt.Sprintf("profiles/%d/%s.%s.pprof", nowUnix, filepath.Base(measurementsPath), profileType))
+			file, _ := os.Create(fmt.Sprintf("profiles/%d/%s.%s.pprof",
+				nowUnix, filepath.Base(measurementsPath), profileType))
 			defer file.Close()
 			defer pprof.Lookup(profileType).WriteTo(file, 0)
 		}
 
-		file, _ := os.Create(fmt.Sprintf("profiles/%d/%s.cpu.pprof", nowUnix, filepath.Base(measurementsPath)))
+		file, _ := os.Create(fmt.Sprintf("profiles/%d/%s.cpu.pprof",
+			nowUnix, filepath.Base(measurementsPath)))
 		defer file.Close()
 		pprof.StartCPUProfile(file)
 		defer pprof.StopCPUProfile()
@@ -187,20 +199,21 @@ func main() {
 
 	f, err := os.Open(measurementsPath)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal(fmt.Errorf("failed to open %s file: %w", measurementsPath, err))
 	}
 	defer f.Close()
 
 	info, err := f.Stat()
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal(fmt.Errorf("failed to read %s file: %w", measurementsPath, err))
 	}
 
 	wg := sync.WaitGroup{}
 	wg.Add(numParsers)
 
+	// buffered to not block on merging
 	chunkOffsetCh := make(chan int64, numParsers)
-	chunkStatsCh := make(chan map[string]*Stats, numParsers) // buffered to not block on merging
+	chunkStatsCh := make(chan map[string]*Stats, numParsers)
 
 	go func() {
 		for i := 0; i < int(info.Size()); i++ {
@@ -211,8 +224,9 @@ func main() {
 	}()
 
 	for i := 0; i < numParsers; i++ {
-		// WARN: w/ 128B padding for line overflow. Each chunk should be read past
-		// the intended size to the next new line.
+		// WARN: w/ extra padding for line overflow. Each chunk should be read past
+		// the intended size to the next new line. 128 bytes should be enough for
+		// a max 100 byte name + the float value.
 		buf := make([]byte, parseChunkSize+128)
 		go func() {
 			for chunkOffset := range chunkOffsetCh {
