@@ -10,6 +10,17 @@ Mainly done as an excuse to play around with `pprof`.
 
 ## Performance
 
+UPDATE: with [hyperfine](https://github.com/sharkdp/hyperfine) parameter testing, got a 20% latency reduction by changing the read buffer size via `PARSE_CHUNK_SIZE_MB`.
+
+```bash
+make evaluate
+# Benchmark 1: ./bin/1brc-go 2>&1
+#   Time (mean ± σ):      5.479 s ±  0.144 s    [User: 38.371 s, System: 1.801 s]
+#   Range (min … max):    5.376 s …  5.733 s    5 runs
+```
+
+### Original Jan 14 testing [Outdated]
+
 On Jan 14, as measured on my 2023 Apple M2 Pro Macbook with 1brc's `evaluate.sh` script, this performs very competitively against the top Java and Go submissions. At the very least this means, I have put in some effort optimizing this for the machine I have in front of me. There is a pretty funny lesson to be learned here that everyone's solution is the fastest on their own machine :)
 
 Props to AlexanderYastrebov who is pushing on enabling language agnostic solutions in the leaderboard. Very curious now to see where this stacks up if I can run it on the test environment. I haven't looked at other Go solution code yet, but the discussion his started would motivate me to write my own.
@@ -25,13 +36,6 @@ Props to AlexanderYastrebov who is pushing on enabling language agnostic solutio
 |   | 00:14.839 | [link](https://github.com/gunnarmorling/1brc/blob/main/src/main/java/dev/morling/onebrc/CalculateAverage_mtopolnik.java)| 21.0.1-graal | [Marko Topolnik](https://github.com/mtopolnik) |  |
 |   | 00:14.949 | [link](https://github.com/gunnarmorling/1brc/blob/main/src/main/java/dev/morling/onebrc/CalculateAverage_merykittyunsafe.java)| 21.0.1-open | [merykittyunsafe](https://github.com/merykittyunsafe) |  |
 |   | 00:16.075 | [link](https://github.com/jkroepke/1brc-go/tree/main/go)| 🔷 Go 1.21.5 | [Jan-Otto Kröpke](https://github.com/jkroepke) | Go implementation |
-
-```bash
-make evaluate
-# Benchmark 1: ./bin/1brc-go 2>&1
-#   Time (mean ± σ):      6.626 s ±  0.170 s    [User: 38.109 s, System: 3.072 s]
-#   Range (min … max):    6.331 s …  6.749 s    5 runs
-```
 
 <br>
 
@@ -64,11 +68,12 @@ Times measured on 2023 Apple M2 Pro Macbook with 10 cores and 16GB RAM.
 * 35s - Implemented a custom, simplified replacement for `strconv.ParseFloat`.
     * Most of the time just goes into scanning byte slices. Biggest other bottleneck is `map[string]*Stats` lookups. Decently pleased with single threaded optimizations so now making it concurrent.
 * 7s - Concurrently read and parse the file as byte index addressed chunks, then merge results in a single final goroutine. See tunable `numParsers` and `parseChunkSize` parameters.
+* 5.5s - Select concurrency and read buffer size parameters for my machine using hyperfine parameter testing.
 
 ### Ideas
 * Optimize concurrency.
     * Pipeline more work.
-    * Tune concurrency and read buffer size parameters. I picked current values for my machine very quickly and unscientifically.
+    * ~Tune concurrency and read buffer size parameters. I picked current values for my machine very quickly and unscientifically.~ Picked w/ hyperfine
 * Custom map/set implementation for string->float
 * Memory arena (or other optimizations of locality)?
 * Faster way to iterate bytes?

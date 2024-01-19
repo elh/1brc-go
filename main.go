@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"runtime/pprof"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -18,23 +19,28 @@ import (
 )
 
 // go run main.go [measurements_file]
+// tune env vars for performance
+//
+// Environment variables:
+// - NUM_PARSERS:         number of parsers to run concurrently. if unset, defaults
+//   			          to runtime.NumCPU()
+// - PARSE_CHUNK_SIZE_MB: size of each chunk to parse. if unset, defaults to
+//                        defaultParseChunkSize
+// - PROFILE:             if "true", enables profiling
 
 var (
-	// Optional env vars
-	shouldProfile = os.Getenv("PROFILE") == "true"
-
-	defaultMeasurementsPath = "measurements.txt"
 	// others: "heap", "threadcreate", "block", "mutex"
 	profileTypes = []string{"goroutine", "allocs"}
 )
 
 const (
-	maxNameLen = 100
-	maxNameNum = 10000
+	defaultMeasurementsPath = "measurements.txt"
+	maxNameLen              = 100
+	maxNameNum              = 10000
 
-	// Tune these for performance
-	minNumParsers  = 12 // currently configured to the number of runtime.NumCPU()
-	parseChunkSize = 256 * 1024 * 1024
+	// tuned for a 2023 Macbook M2 Pro
+	defaultParseChunkSizeMB = 64
+	mb                      = 1024 * 1024 // bytes
 )
 
 type Stats struct {
@@ -176,11 +182,39 @@ func printResults(stats map[string]*Stats) { // doesn't help
 // offset chan and send results on an output chan. The results are merged into a
 // single map of stats and printed.
 func main() {
+	// parse env vars and inputs
+	shouldProfile := os.Getenv("PROFILE") == "true"
+	var err error
+	var numParsers int
+	{
+		if os.Getenv("NUM_PARSERS") != "" {
+			numParsers, err = strconv.Atoi(os.Getenv("NUM_PARSERS"))
+			if err != nil {
+				log.Fatal(fmt.Errorf("failed to parse NUM_PARSERS: %w", err))
+			}
+		} else {
+			numParsers = runtime.NumCPU()
+		}
+	}
+	var parseChunkSize int
+	{
+		if os.Getenv("PARSE_CHUNK_SIZE_MB") != "" {
+			parseChunkSizeMB, err := strconv.Atoi(os.Getenv("PARSE_CHUNK_SIZE_MB"))
+			if err != nil {
+				log.Fatal(fmt.Errorf("failed to parse PARSE_CHUNK_SIZE_MB: %w", err))
+			}
+			parseChunkSize = parseChunkSizeMB * mb
+		} else {
+			parseChunkSize = defaultParseChunkSizeMB * mb
+		}
+	}
+
 	measurementsPath := defaultMeasurementsPath
 	if len(os.Args) > 1 {
 		measurementsPath = os.Args[1]
 	}
 
+	// profile code
 	if shouldProfile {
 		nowUnix := time.Now().Unix()
 		os.MkdirAll(fmt.Sprintf("profiles/%d", nowUnix), 0755)
@@ -211,11 +245,6 @@ func main() {
 	}
 
 	// kick off "parser" workers
-	numParsers := runtime.NumCPU()
-	if minNumParsers > numParsers {
-		numParsers = minNumParsers
-	}
-
 	wg := sync.WaitGroup{}
 	wg.Add(numParsers)
 
