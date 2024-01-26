@@ -253,7 +253,8 @@ func main() {
 	chunkStatsCh := make(chan map[string]*Stats, numParsers)
 
 	go func() {
-		for i := 0; i < int(info.Size()); i++ {
+		i := 0
+		for i < int(info.Size()) {
 			chunkOffsetCh <- int64(i)
 			i += parseChunkSize
 		}
