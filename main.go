@@ -16,6 +16,8 @@ import (
 	"sync"
 	"time"
 	"unsafe"
+
+	"github.com/dolthub/swiss"
 )
 
 // go run main.go [measurements_file]
@@ -78,8 +80,8 @@ func parseFloatFast(bs []byte) float64 {
 // size is the intended number of bytes to parse. buffer should be longer than size
 // because we need to continue reading until the end of the line in order to
 // properly segment the entire file and not miss any data.
-func parseAt(f *os.File, buf []byte, offset int64, size int) map[string]*Stats {
-	stats := make(map[string]*Stats, maxNameNum)
+func parseAt(f *os.File, buf []byte, offset int64, size int) *swiss.Map[string, *Stats] {
+	stats := swiss.NewMap[string, *Stats](maxNameNum)
 	n, err := f.ReadAt(buf, offset) // load the buffer
 	if err != nil && err != io.EOF {
 		log.Fatal(err)
@@ -123,9 +125,9 @@ func parseAt(f *os.File, buf []byte, offset int64, size int) map[string]*Stats {
 					value := parseFloatFast(valueBs)
 
 					nameUnsafe := unsafe.String(&lastName[0], lastNameLen)
-					if s, ok := stats[nameUnsafe]; !ok {
+					if s, ok := stats.Get(nameUnsafe); !ok {
 						name := string(lastName[:lastNameLen]) // actually allocate string
-						stats[name] = &Stats{Min: value, Max: value, Sum: value, Count: 1}
+						stats.Put(name, &Stats{Min: value, Max: value, Sum: value, Count: 1})
 					} else {
 						if value < s.Min {
 							s.Min = value
@@ -275,7 +277,7 @@ func main() {
 
 	// buffered to not block on merging
 	chunkOffsetCh := make(chan int64, numParsers)
-	chunkStatsCh := make(chan map[string]*Stats, numParsers)
+	chunkStatsCh := make(chan *swiss.Map[string, *Stats], numParsers)
 
 	go func() {
 		i := 0
@@ -306,7 +308,7 @@ func main() {
 
 	mergedStats := make(map[string]*Stats, maxNameNum)
 	for chunkStats := range chunkStatsCh {
-		for name, s := range chunkStats {
+		chunkStats.Iter(func(name string, s *Stats) bool {
 			if ms, ok := mergedStats[name]; !ok {
 				mergedStats[name] = s
 			} else {
@@ -319,7 +321,8 @@ func main() {
 				ms.Sum += s.Sum
 				ms.Count += s.Count
 			}
-		}
+			return false
+		})
 	}
 
 	printResults(mergedStats)
