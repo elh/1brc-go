@@ -4,6 +4,7 @@ profiles/
 timing.json
 measurements.txt
 measurements.out
+default.pgo
 
 ignore/
 
