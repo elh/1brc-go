@@ -15,8 +15,8 @@ UPDATE: with [hyperfine](https://github.com/sharkdp/hyperfine) parameter testing
 ```bash
 make evaluate
 # Benchmark 1: ./bin/1brc-go 2>&1
-#   Time (mean ± σ):      5.479 s ±  0.144 s    [User: 38.371 s, System: 1.801 s]
-#   Range (min … max):    5.376 s …  5.733 s    5 runs
+#   Time (mean ± σ):      5.285 s ±  0.044 s    [User: 37.080 s, System: 1.937 s]
+#   Range (min … max):    5.233 s …  5.334 s    5 runs
 ```
 
 ### Original Jan 14 testing [Outdated]
@@ -68,13 +68,16 @@ Times measured on 2023 Apple M2 Pro Macbook with 10 cores and 16GB RAM.
 * 35s - Implemented a custom, simplified replacement for `strconv.ParseFloat`.
     * Most of the time just goes into scanning byte slices. Biggest other bottleneck is `map[string]*Stats` lookups. Decently pleased with single threaded optimizations so now making it concurrent.
 * 7s - Concurrently read and parse the file as byte index addressed chunks, then merge results in a single final goroutine. See tunable `numParsers` and `parseChunkSize` parameters.
-* 5.5s - Select concurrency and read buffer size parameters for my machine using hyperfine parameter testing.
+* 5.3s - Select concurrency and read buffer size parameters for my machine using hyperfine parameter testing.
+* 5.3s - Profile-guided optimization makes some compilation changes but does not affect runtime performance.
+
 
 ### Ideas
 * Optimize concurrency.
     * Pipeline more work.
     * ~Tune concurrency and read buffer size parameters. I picked current values for my machine very quickly and unscientifically.~ Picked w/ hyperfine
 * Custom map/set implementation for string->float
+    * try dolthub/swiss?
 * Memory arena (or other optimizations of locality)?
 * Faster way to iterate bytes?
 
@@ -84,6 +87,7 @@ Times measured on 2023 Apple M2 Pro Macbook with 10 cores and 16GB RAM.
 * https://github.com/DataDog/go-profiler-notes/blob/main/guide/README.md#cpu-profiler ⭐️
 * https://pkg.go.dev/bufio
 * https://pkg.go.dev/unsafe#String
+* https://go.dev/doc/pgo
 * https://go.dev/src/arena/arena.go
 
 <br>

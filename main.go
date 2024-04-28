@@ -178,6 +178,27 @@ func printResults(stats map[string]*Stats) { // doesn't help
 	writer.Flush()
 }
 
+func copyFile(src, dst string) error {
+	sourceFile, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer sourceFile.Close()
+
+	destFile, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer destFile.Close()
+
+	_, err = io.Copy(destFile, sourceFile)
+	if err != nil {
+		return err
+	}
+
+	return destFile.Sync()
+}
+
 // Read file in chunks and parse concurrently. N parsers work off of a chunk
 // offset chan and send results on an output chan. The results are merged into a
 // single map of stats and printed.
@@ -225,8 +246,11 @@ func main() {
 			defer pprof.Lookup(profileType).WriteTo(file, 0)
 		}
 
-		file, _ := os.Create(fmt.Sprintf("profiles/%d/%s.cpu.pprof",
-			nowUnix, filepath.Base(measurementsPath)))
+		cpuFile := fmt.Sprintf("profiles/%d/%s.cpu.pprof", nowUnix, filepath.Base(measurementsPath))
+		// default file loc for profile-guided optimization
+		defer copyFile(cpuFile, "default.pgo")
+
+		file, _ := os.Create(cpuFile)
 		defer file.Close()
 		pprof.StartCPUProfile(file)
 		defer pprof.StopCPUProfile()
