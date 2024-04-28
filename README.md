@@ -15,8 +15,8 @@ UPDATE: with [hyperfine](https://github.com/sharkdp/hyperfine) parameter testing
 ```bash
 make evaluate
 # Benchmark 1: ./bin/1brc-go 2>&1
-#   Time (mean ± σ):      5.285 s ±  0.044 s    [User: 37.080 s, System: 1.937 s]
-#   Range (min … max):    5.233 s …  5.334 s    5 runs
+#   Time (mean ± σ):      4.665 s ±  0.028 s    [User: 39.196 s, System: 1.816 s]
+#   Range (min … max):    4.634 s …  4.695 s    5 runs
 ```
 
 ### Original Jan 14 testing [Outdated]
@@ -70,6 +70,7 @@ Times measured on 2023 Apple M2 Pro Macbook with 10 cores and 16GB RAM.
 * 7s - Concurrently read and parse the file as byte index addressed chunks, then merge results in a single final goroutine. See tunable `numParsers` and `parseChunkSize` parameters.
 * 5.3s - Select concurrency and read buffer size parameters for my machine using hyperfine parameter testing.
 * 5.3s - Profile-guided optimization makes some compilation changes but does not affect runtime performance.
+* 4.7s - Change concurrency and read buffer size parameters again. 14 goroutines (for 10 CPU cores) and 16MB parser chunk size.
 
 
 ### Ideas

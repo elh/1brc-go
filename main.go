@@ -23,7 +23,7 @@ import (
 //
 // Environment variables:
 // - NUM_PARSERS:         number of parsers to run concurrently. if unset, defaults
-//   			          to runtime.NumCPU()
+//   			          to runtime.NumCPU() + 4.
 // - PARSE_CHUNK_SIZE_MB: size of each chunk to parse. if unset, defaults to
 //                        defaultParseChunkSize
 // - PROFILE:             if "true", enables profiling
@@ -39,7 +39,8 @@ const (
 	maxNameNum              = 10000
 
 	// tuned for a 2023 Macbook M2 Pro
-	defaultParseChunkSizeMB = 64
+	extraNumParsers         = 4 // in addition to runtime.NumCPU()
+	defaultParseChunkSizeMB = 16
 	mb                      = 1024 * 1024 // bytes
 )
 
@@ -214,7 +215,7 @@ func main() {
 				log.Fatal(fmt.Errorf("failed to parse NUM_PARSERS: %w", err))
 			}
 		} else {
-			numParsers = runtime.NumCPU()
+			numParsers = runtime.NumCPU() + extraNumParsers
 		}
 	}
 	var parseChunkSize int
